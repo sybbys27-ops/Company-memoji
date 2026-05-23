@@ -235,8 +235,56 @@ const STORAGE_KEY = "memo_widget_v2_gits";
           return null;
         }
       }
-      function saveState(state){
+      function saveState(state, updateTimestamp = true){
+        if (updateTimestamp) {
+          state.lastUpdated = Date.now();
+        }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        updateTimeDisplay();
+      }
+
+      // ==========================================
+      // [공통 1단계] 타임스탬프 검사소 (Helper Function)
+      // ==========================================
+      function shouldUpdateFromCloud(localTime, cloudTime) {
+        if (!localTime) return true; 
+        if (!cloudTime) return false; 
+
+        if (cloudTime >= localTime) {
+          return true; 
+        } else {
+          return confirm(
+            "⚠️ 동기화 충돌 경고 ⚠️\n\n" +
+            "현재 내 PC에 작성된 내용이 구름(Gist) 데이터보다 더 최신입니다.\n" +
+            "과거의 구름 데이터로 정말 덮어쓰시겠습니까?\n\n" +
+            "( [취소]를 누르면 덮어쓰지 않고 현재 내용을 안전하게 유지합니다. )"
+          );
+        }
+      }
+
+      // ==========================================
+      // [보너스] 시간 변환 및 화면 출력 함수
+      // ==========================================
+      function formatTimestamp(ms) {
+        if (!ms) return "기록 없음";
+        
+        const d = new Date(ms);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const hours = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
+        
+        return `${year}-${month}-${day} ${hours}:${minutes}`;
+      }
+
+      function updateTimeDisplay() {
+        const localState = loadState();
+        const timeText = formatTimestamp(localState?.lastUpdated);
+        const el = document.getElementById("last-sync-time");
+        if (el) {
+          el.textContent = `마지막 수정: ${timeText}`;
+        }
       }
       function uid(){
         return Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
@@ -284,11 +332,11 @@ const STORAGE_KEY = "memo_widget_v2_gits";
           <div class="tabs" aria-label="기록 탭"></div>
           <div class="memo-body">
             <div class="note" contenteditable="true" aria-label="메모 입력" data-placeholder="여기에 메모를 적으세요."></div>
-            <div class="hint">팁: 탭 더블클릭으로 이름 변경. (탭별 자동 저장)</div>
-
-
-
-</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex: 0 0 auto;">
+              <div class="hint" style="margin-top: 0;">팁: 탭 더블클릭으로 이름 변경. (탭별 자동 저장)</div>
+              <div id="last-sync-time" style="font-size: 11px; color: var(--muted); user-select: none;">마지막 수정: 기록 없음</div>
+            </div>
+          </div>
           <div class="modal-overlay" id="sync-modal">
             <div class="modal-box">
               <div style="font-weight:bold; color:#fff; margin-bottom:5px;">☁️ 구름 동기화 설정</div>
@@ -407,6 +455,7 @@ const STORAGE_KEY = "memo_widget_v2_gits";
           renderTabs();
           renderPalette();
           renderNote();
+          updateTimeDisplay();
         }
 
         noteEl.addEventListener("input", () => {
@@ -501,17 +550,26 @@ if(act === "sync-setting"){
               btn.textContent = originalText;
               const file = data.files && data.files["memoji_data.json"];
               if(file) {
-                const importedState = JSON.parse(file.content);
-                const currentToken = state.githubToken;
-                const currentGistId = state.gistId;
-                
-                Object.assign(state, importedState);
-                state.githubToken = currentToken;
-                state.gistId = currentGistId;
-                
-                saveState(state);
-                render();
-                alert("구름에서 메모를 성공적으로 불러왔습니다! ☁️");
+                try {
+                  const importedState = JSON.parse(file.content);
+                  const cloudTime = importedState.lastUpdated || 0;
+                  const localTime = state.lastUpdated || 0;
+
+                  if (shouldUpdateFromCloud(localTime, cloudTime)) {
+                    const currentToken = state.githubToken;
+                    const currentGistId = state.gistId;
+                    
+                    Object.assign(state, importedState);
+                    state.githubToken = currentToken;
+                    state.gistId = currentGistId;
+                    
+                    saveState(state, false);
+                    render();
+                    alert("구름에서 메모를 성공적으로 불러왔습니다! ☁️");
+                  } else {
+                    console.log("보호 모드 작동: 로컬 최신 데이터 유지됨");
+                  }
+                } catch(e) { alert("데이터 파싱 오류가 발생했습니다."); }
               } else {
                 alert("저장된 메모 데이터를 찾을 수 없습니다.");
               }
